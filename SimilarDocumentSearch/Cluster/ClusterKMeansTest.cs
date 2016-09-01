@@ -3,16 +3,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace CustomTFIDF
 {
-    public class ClusterKMeansTestElkans
+    public class ClusterKMeansTest
     {
-        // KMEANS CLUSTERING
         private int _k;
         private List<Document> _documents;
-        private Dictionary<int, double>[] _TFIDFDicts;
+        private Dictionary<int, double>[] _TFIDFDicts; 
 
         private List<ClusterTest> _clusters;
         private int _maxIter;
@@ -28,13 +26,9 @@ namespace CustomTFIDF
         private double _previousSK = 0.0;
         private double _previousAK = 0.0;
 
-        private Dictionary<Tuple<int, int>, double> _lowerBoundsDictionary;
-        private double[] _upperBoundsArray;
-        private int[] _closestCenterArray;
-        private Dictionary<Tuple<int, int>, double> _CenterToCenterDistDictionary;
-        private double[] _CenterToClosestCenterDistArray;
+        private Dictionary<Tuple<int, int>, double> _lowerBoundsDictionary; 
 
-        public ClusterKMeansTestElkans(int maxIter, string[] documents, string[] titles)
+        public ClusterKMeansTest(int maxIter, string[] documents, string[] titles)
         {
             // create new parser and create documents
             Parser parser = new Parser();
@@ -44,9 +38,6 @@ namespace CustomTFIDF
             List<string> titlesList = titles.ToList();
             random = new Random();
             _lowerBoundsDictionary = new Dictionary<Tuple<int, int>, double>();
-            _CenterToCenterDistDictionary = new Dictionary<Tuple<int, int>, double>();
-            
-            
 
             // remove empty documents -- TODO Refactor!
             for (int i = 0; i < documentList.Count; i++)
@@ -57,10 +48,7 @@ namespace CustomTFIDF
                     titlesList.RemoveAt(i);
                 }
             }
-
-            _upperBoundsArray = new double[documentList.Count];
-            _closestCenterArray = new int[documentList.Count];
-
+            
             // initialize maxiter
             _maxIter = maxIter;
 
@@ -76,266 +64,6 @@ namespace CustomTFIDF
         {
             // calculate TFIDF Vectors for all documents
             _TFIDFDicts = CalcTFIDF.ReturnTFIDFDicts(_documents);
-        }
-
-        private void setInitialLowerBounds()
-        {   
-            for (int i = 0; i < _documents.Count; i++)
-            {
-                for (int j = 0; j < _clusters.Count; j++)
-                {
-                    _lowerBoundsDictionary.Add(new Tuple<int, int>(i, j), 0);
-                }
-            }
-        }
-
-        // initializes d(c, c') for all c, c'
-        private void InitializeAllDistancesBetweenCenters()
-        {
-            for (int i = 0; i < _clusters.Count - 1; i++)
-            {
-                for (int j = i + 1; j < _clusters.Count; j++)
-                {
-                    _CenterToCenterDistDictionary.Add(new Tuple<int, int>(i, j), 1 - CosineSimilarity(_clusters[i].CentroidDictionary, _clusters[j].CentroidDictionary));
-                }
-            }
-        }
-
-        // updates all d(c, c') for all c, c'
-        private void updateAllDistancesBetweenCenters()
-        {
-            for (int i = 0; i < _clusters.Count - 1; i++)
-            {
-                for (int j = i + 1; j < _clusters.Count; j++)
-                {
-                    _CenterToCenterDistDictionary[new Tuple<int, int>(i, j)] = 1 - CosineSimilarity(_clusters[i].CentroidDictionary, _clusters[j].CentroidDictionary);
-                }
-            }
-        }
-
-        // updates all s(c)
-        private void updateCenterDistToClosestCenter()
-        {
-            for (int i = 0; i < _clusters.Count; i++)
-            {
-                double min = Double.MaxValue;
-                
-                foreach (Tuple<int, int> key in _CenterToCenterDistDictionary.Keys)
-                {
-                    if (key.Item1 == i || key.Item2 == i)
-                    {
-                        var value = _CenterToCenterDistDictionary[key];
-                        if (value < min)
-                        {
-                            min = value;
-                        }
-                    }
-                }
-                _CenterToClosestCenterDistArray[i] = min * 0.5;
-            }
-        }
-
-        private void UpdateInitialClusterDocuments()
-        {
-            // For each cluster, reset the Documents list
-            foreach (var cluster in _clusters)
-            {
-                cluster.Documents = new List<int>();
-            }
-
-            // Assign each document to a cluster that is "closest" using cosine similarity -- bigger is closer!
-            for (int i = 0; i < _TFIDFDicts.Length; i++)
-            {
-                Dictionary<int, double> currentDocDictionary = _TFIDFDicts[i];
-
-                int clusterIndex = 0;
-                double distToAssignedCluster = DistanceBetweenDocumentAndCluster(i, clusterIndex);
-                
-                for (int j = 0; j < _clusters.Count; j++) // loop through clusters
-                {
-                    Dictionary<int, double> currentClusterDictionary = _clusters[j].CentroidDictionary;
-
-                    if (clusterIndex != j)
-                    {
-                        int lowerIndex = clusterIndex < j ? clusterIndex : j;
-                        int higherIndex = clusterIndex > j ? clusterIndex : j;
-
-                        double distCurrentClusterToAssignedCluster = _CenterToCenterDistDictionary[new Tuple<int, int>(lowerIndex, higherIndex)];
-
-                        if (distToAssignedCluster > distCurrentClusterToAssignedCluster)
-                        {
-                            var newDist = DistanceBetweenDocumentAndCluster(i, j);
-
-                            if (newDist < distToAssignedCluster)
-                            {
-                                clusterIndex = j;
-                                distToAssignedCluster = newDist;
-                            }
-                        }
-                    }
-                }
-
-                // add to max (most similar) cluster's list of documents
-                _clusters[clusterIndex].Documents.Add(i);
-
-                // add to c(x)
-                _closestCenterArray[i] = clusterIndex;
-                
-                // add upper bound, u(x) = d(x, c(x))
-                _upperBoundsArray[i] = distToAssignedCluster;
-            }
-        }
-
-        private void NewUpdateClusterDocuments()
-        {
-            // compute d(c, c') for all c, c'
-            //var watch = System.Diagnostics.Stopwatch.StartNew();
-            updateAllDistancesBetweenCenters();
-            //watch.Stop();
-            //var elapsedMs = watch.ElapsedMilliseconds;
-            //Debug.WriteLine("updating all distances between centers: " + elapsedMs + "  ms");
-
-            // compute s(c) for all c
-            //var watch1 = System.Diagnostics.Stopwatch.StartNew();
-            updateCenterDistToClosestCenter();
-            //watch1.Stop();
-            //var elapsedMs1 = watch1.ElapsedMilliseconds;
-            //Debug.WriteLine("updating center dist to closest center: " + elapsedMs1 + "  ms");
-
-            // other
-            //var watch2 = System.Diagnostics.Stopwatch.StartNew();
-
-            var counter = 0;
-            // If u(x) <= s(c(x)), we don't need to calculate anything.
-            for (int x = 0; x < _TFIDFDicts.Length; x++)
-            {
-                var cOfX = _closestCenterArray[x];
-
-                if (_upperBoundsArray[x] > _CenterToClosestCenterDistArray[_closestCenterArray[x]])
-                {
-                    for (int j = 0; j < _clusters.Count; j++) // clusters loop
-                    { 
-                        if (cOfX != j)
-                        {
-                            // three conditions:
-                            // c != c(x)
-                            var cOne = j != cOfX; // c != c(x)
-
-                            // u(x) > l(x, c)
-                            var xcTuple = new Tuple<int, int>(x, j);
-                            var cTwo = _upperBoundsArray[x] > _lowerBoundsDictionary[xcTuple];
-
-                            // u(x) > 1/2 (d(c(x), c))
-                            int lowerIndex = cOfX < j ? cOfX : j;
-                            int higherIndex = cOfX > j ? cOfX : j;
-
-                            var distCofXtoC = _CenterToCenterDistDictionary[new Tuple<int, int>(lowerIndex, higherIndex)];
-                            var cThree = _upperBoundsArray[x] > (0.5 * distCofXtoC);
-
-                            // if all three conditions are met
-                            if (cOne && cTwo && cThree)
-                            {
-                                counter++;    
-                                // (a) - compute d(x, c(x)) and update u(x) = d(x, c(x))
-                                var distance = DistanceBetweenDocumentAndCluster(x, cOfX);
-                                _upperBoundsArray[x] = distance;
-
-                                // (b) if distance > l(x,c) or distance > 1/2 d(c(x), c), then compute d(x,c)
-                                if (distance > _lowerBoundsDictionary[xcTuple] || distance > distCofXtoC)
-                                {
-                                    // d(x,c)
-                                    var actualDistance = DistanceBetweenDocumentAndCluster(x, j);
-
-                                    // if d(x,c) < d(x, c(x)), then assign c(x) = c and update u(x) = d(x, c(x)) 
-                                    if (actualDistance < distance)
-                                    {
-                                        int indexAssignedCenter = _closestCenterArray[x];
-                                        // remove from cluster already assigned
-                                        _clusters[indexAssignedCenter].Documents.Remove(x);
-
-                                        // now reassign c(x) = c
-                                        _clusters[j].Documents.Add(x);
-                                        _closestCenterArray[x] = j;
-
-                                        // update u(x)
-                                        _upperBoundsArray[x] = actualDistance;
-                                    }
-                                }
-                            }
-                        }           
-                    }
-                }
-            }
-            Debug.WriteLine("Came into the loop " + counter + " times");
-            //watch2.Stop();
-            //var elapsedMs2 = watch2.ElapsedMilliseconds;
-            //Debug.WriteLine("other: " + elapsedMs2 + "  ms");
-        }
-
-
-        private void NewUpdateCentroidMeans()
-        {
-            // so that algorithm checks that centroid means have changed -- the condition for the algorithm to keep running
-            _hasChanged = false;
-
-            for (int c = 0; c < _clusters.Count; c++) // for each cluster
-            {
-                ClusterTest currentCluster = _clusters[c];
-                Dictionary<int, double> updatedDictionary = new Dictionary<int, double>();
-
-                Dictionary<int, double> oldDictionary = currentCluster.CentroidDictionary;
-
-                // calculate the updated vector for the centroid (average)
-                foreach (var documentIndex in currentCluster.Documents)
-                {
-                    Dictionary<int, double> currentDocumentDictionary = _TFIDFDicts[documentIndex];
-
-                    foreach (var key in currentDocumentDictionary.Keys)
-                    {
-                        if (updatedDictionary.ContainsKey(key))
-                        {
-                            updatedDictionary[key] = updatedDictionary[key] + currentDocumentDictionary[key];
-                        }
-                        else
-                        {
-                            updatedDictionary.Add(key, currentDocumentDictionary[key]);
-                        }
-                    }
-                }
-
-                // Divide by how many documents were in the cluster to calculate average
-                List<int> keysList = new List<int>(updatedDictionary.Keys);
-                foreach (var key in keysList)
-                {
-                    updatedDictionary[key] = updatedDictionary[key] / currentCluster.Documents.Count;
-                }
-                
-                var distanceBetweenCandMC = 1 - CosineSimilarity(oldDictionary, updatedDictionary);
-                
-                //assign l(x,c) = max{ l(x,c) - d(c, m(c)), 0} for all x
-                for (int x = 0; x < _TFIDFDicts.Length; x++)
-                {
-                    var tuple = new Tuple<int, int>(x, c);
-                    _lowerBoundsDictionary[tuple] = Math.Max(_lowerBoundsDictionary[tuple] - distanceBetweenCandMC, 0);
-                }
-
-                for (int i = 0; i < _clusters[c].Documents.Count; i++)
-                {
-                    _upperBoundsArray[_clusters[c].Documents[i]] += distanceBetweenCandMC;
-                }
-                
-                // if centroid means have not changed yet, check if this one has changed
-                if (_hasChanged == false)
-                {
-                    if (!DictionaryUtils.DictionaryEqual(currentCluster.CentroidDictionary, updatedDictionary))
-                    {
-                        _hasChanged = true;
-                    }
-                }
-
-                // actually update centroid for current cluster
-                currentCluster.CentroidDictionary = updatedDictionary;
-            }
         }
 
         public void GenerateClustersWithoutK()
@@ -395,49 +123,30 @@ namespace CustomTFIDF
             // initialize first k centroids with k-means++ algorithm
             _clusters = InitCentroidsPlusPlus();
 
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            
-            // set l(x,c) = 0
-            setInitialLowerBounds();
-
-            // d(c,c')
-            InitializeAllDistancesBetweenCenters();
-
-            // update initial cluster documents
-            UpdateInitialClusterDocuments();
-
-            _CenterToClosestCenterDistArray = new double[k];
-
             GenerateClustersWithK();
-
+            
             //Debug.WriteLine("Done with cluster generation, SSE: " + DistortionSum());
-
-            watch.Stop();
-            var elapsedMs = watch.ElapsedMilliseconds;
-            Debug.WriteLine("updating cluster documents took: " + elapsedMs + "  ms");
         }
-
-
 
         private void GenerateClustersWithK()
         {
             while (_curIter < _maxIter && _hasChanged) //check condition for break point of algorithm
             {
                 _curIter++;
+                //TestOutPut();
 
-                //var watch = System.Diagnostics.Stopwatch.StartNew();
-                NewUpdateClusterDocuments();
-                //watch.Stop();
-                //var elapsedMs = watch.ElapsedMilliseconds;
-                //Debug.WriteLine("updating cluster documents took: " + elapsedMs + "  ms");
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                UpdateClusterDocuments();
+                watch.Stop();
+                var elapsedMs = watch.ElapsedMilliseconds;
+                Debug.WriteLine("updating cluster documents took: "  + elapsedMs + "  ms");
 
-                //var watch1 = System.Diagnostics.Stopwatch.StartNew();
-                NewUpdateCentroidMeans();
-                //watch1.Stop();
-                //var elapsedMs1 = watch1.ElapsedMilliseconds;
-                //Debug.WriteLine("updating centroid means took: " + elapsedMs1 + "  ms");   
+                var watch1 = System.Diagnostics.Stopwatch.StartNew();
+                UpdateCentroidMeans();
+                watch1.Stop();
+                var elapsedMs1 = watch1.ElapsedMilliseconds;
+                Debug.WriteLine("updating centroid means took: " + elapsedMs1 + "  ms");
             }
-            
             TestOutPut();
         }
 
@@ -461,8 +170,8 @@ namespace CustomTFIDF
                 for (int j = 0; j < _clusters.Count; j++) // loop through clusters
                 {
                     Dictionary<int, double> currentClusterDictionary = _clusters[j].CentroidDictionary;
-                    double cosSim = CosineSimilarity(currentDocDictionary, currentClusterDictionary);
-
+                    double cosSim = CosineSimilarity(currentDocDictionary, currentClusterDictionary); 
+                    
                     if (cosSim > max) // current cluster is closer, update argmax and max
                     {
                         argmax = j;
@@ -482,12 +191,12 @@ namespace CustomTFIDF
         {
             // so that algorithm checks that centroid means have changed -- the condition for the algorithm to keep running
             _hasChanged = false;
-
+            
             for (int i = 0; i < _clusters.Count; i++) // for each cluster
             {
                 ClusterTest currentCluster = _clusters[i];
                 Dictionary<int, double> updatedDictionary = new Dictionary<int, double>();
-
+                
                 // calculate the updated vector for the centroid (average)
                 foreach (var documentIndex in currentCluster.Documents)
                 {
@@ -505,7 +214,7 @@ namespace CustomTFIDF
                         }
                     }
                 }
-
+                
                 // Divide by how many documents were in the cluster to calculate average
                 List<int> keysList = new List<int>(updatedDictionary.Keys);
                 foreach (var key in keysList)
@@ -555,9 +264,9 @@ namespace CustomTFIDF
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 for (int i = 0; i < _documents.Count; i++)
                 {
-
+                    
                     _distanceSqToClosestCentroid[i] = DistanceSqToClosestCentroid(_TFIDFDicts[i]);
-
+                    
                 }
                 watch.Stop();
                 Debug.WriteLine("Getting distance squareds: " + watch.ElapsedMilliseconds);
@@ -573,7 +282,7 @@ namespace CustomTFIDF
 
             return _initClustersChosenSoFar;
         }
-
+        
         /// <summary>
         /// 
         /// </summary>
@@ -642,8 +351,6 @@ namespace CustomTFIDF
         }
         #endregion
 
-
-
         /// <summary>
         /// The sum of all distortion, where for each cluster the distortion is the sum of the distances from the documents in that cluster to its centroid
         /// </summary>
@@ -665,24 +372,6 @@ namespace CustomTFIDF
             return distortionSum;
         }
 
-
-        private double DistanceBetweenDocumentAndCluster(int documentIndex, int clusterIndex)
-        {
-            var distance = 1 - CosineSimilarity(_TFIDFDicts[documentIndex], _clusters[clusterIndex].CentroidDictionary);
-
-            // every time we compute d(x,c), update l(x, c) = d(x, c)
-            _lowerBoundsDictionary[new Tuple<int, int>(documentIndex, clusterIndex)] = distance;
-
-            // everytime we compute d(x, c(x)), update u(x) = d(x, c(x))
-            if (clusterIndex == _closestCenterArray[documentIndex])
-            {
-                _upperBoundsArray[documentIndex] = distance;
-            }
-
-
-            return distance;
-        }
-
         /// <summary>
         /// Calculates the cosine similarity (both vectors must be UNIT vectors)
         /// </summary>
@@ -691,7 +380,7 @@ namespace CustomTFIDF
         /// <returns></returns>
         public static double CosineSimilarity(Dictionary<int, double> d1, Dictionary<int, double> d2)
         {
-            double dotProduct = Runner.testDotProduct2(d1, d2);
+            double dotProduct = VectorUtil.dotProductDictionary(d1, d2);
 
             // for error
             if (dotProduct > 1)

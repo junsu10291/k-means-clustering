@@ -34,30 +34,6 @@ namespace CustomTFIDF
             Task.Run(async delegate { await RunKMeans(); });
         }
 
-        private async Task Run()
-        {
-            // initialize megaDictionary
-            MegaDictionary mega = new MegaDictionary();
-            
-            List<string> fileNames = new List<string>();
-            List<string> data = new List<string>();
-
-            var allfiles = await ApplicationData.Current.LocalFolder.GetFilesAsync();
-
-            foreach (var storageFile in allfiles)
-            {
-                IBuffer buffer = await FileIO.ReadBufferAsync(storageFile);
-                DataReader reader = DataReader.FromBuffer(buffer);
-                byte[] fileContent = new byte[reader.UnconsumedBufferLength];
-                reader.ReadBytes(fileContent);
-                string text = Encoding.UTF8.GetString(fileContent, 0, fileContent.Length);
-                data.Add(text);
-                fileNames.Add(storageFile.Name);
-            }
-            
-            Runner.Run(data.ToArray(), fileNames.ToArray());
-        }
-
         private async Task RunKMeans()
         {
             MegaDictionary mega = new MegaDictionary();
@@ -66,8 +42,7 @@ namespace CustomTFIDF
             List<string> data = new List<string>();
 
             var allfiles = await ApplicationData.Current.LocalFolder.GetFilesAsync();
-
-
+            
             Debug.WriteLine(ApplicationData.Current.LocalFolder.Path);
 
             string[] hi = new string[allfiles.Count];

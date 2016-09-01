@@ -384,7 +384,7 @@ namespace CustomTFIDF
         /// <returns></returns>
         public static double CosineSimilarity(double[] vec1, double[] vec2)
         {
-            double dotProduct = Runner.dotProd(vec1, vec2);
+            double dotProduct = VectorUtil.dotProd(vec1, vec2);
             return dotProduct;
         }
         

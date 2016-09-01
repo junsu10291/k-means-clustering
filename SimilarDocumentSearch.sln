@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
 VisualStudioVersion = 14.0.25123.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CustomTFIDF", "CustomTFIDF\CustomTFIDF.csproj", "{63E84CE7-FB87-4A9A-B5B9-47FE8A1E7BCA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimilarDocumentSearch", "CustomTFIDF\SimilarDocumentSearch.csproj", "{63E84CE7-FB87-4A9A-B5B9-47FE8A1E7BCA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
