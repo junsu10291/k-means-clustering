@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 
 namespace CustomTFIDF
@@ -9,7 +10,7 @@ namespace CustomTFIDF
     {
         private int _k;
         private List<Document> _documents;
-        private double[][] _TFIDFVectors;
+        private Dictionary<int, double>[] _TFIDFDicts; 
 
         private List<Cluster> _clusters;
         private int _maxIter;
@@ -25,12 +26,20 @@ namespace CustomTFIDF
         private double _previousSK = 0.0;
         private double _previousAK = 0.0;
 
-        // when we don't know k
-        public ClusterKMeans(int maxIter, string[] documents, string[] titles)
+        /// <summary>
+        /// Constructor, takes in 
+        /// </summary>
+        /// <param name="maxIter"></param>
+        /// <param name="documents"></param>
+        /// <param name="titles"></param>
+        public ClusterKMeans(string[] documents, string[] titles, int maxIter = 20)
         {
             // create new parser and create documents
             Parser parser = new Parser();
             List<Document> documentList = parser.parseMultipleDocs(documents.ToList(), titles.ToList());
+
+            // calculate tfidfs
+            _TFIDFDicts = CalcTFIDF.ReturnTFIDFDicts(_documents);
 
             _documents = documentList;
             List<string> titlesList = titles.ToList();
@@ -45,7 +54,7 @@ namespace CustomTFIDF
                     titlesList.RemoveAt(i);
                 }
             }
-
+            
             // initialize maxiter
             _maxIter = maxIter;
 
@@ -57,23 +66,12 @@ namespace CustomTFIDF
             }
         }
 
-        public void calcTFIDFVectors()
-        {
-            // calculate TFIDF Vectors for all documents
-            _TFIDFVectors = CalcTFIDF.LshTfidf(_documents);
-        }
-
         public void GenerateClustersWithoutK()
         {
-            int numData = _documents.Count;
-            //int ruleOfThumbK = (int) Math.Sqrt(numData/2);
-
-            // for now, lets just go up until the rule of thumb k
-            for (int i = 1; i <= 10; i++)
+            for (int i = 1; i <= 15; i++)
             {
                 Debug.WriteLine("Running cluster generation with " + i + " clusters");
                 GenerateClustersWithK(i);
-                //Debug.WriteLine("SSE: " + DistortionSum());
                 evaluateCurrentFK();
                 _previousSK = DistortionSum();
             }
@@ -124,11 +122,9 @@ namespace CustomTFIDF
             // initialize first k centroids with k-means++ algorithm
             _clusters = InitCentroidsPlusPlus();
 
-            // call generate
             GenerateClustersWithK();
-
-            // after done, generate distortion
-            Debug.WriteLine("SSE: " + DistortionSum());
+            
+            //Debug.WriteLine("Done with cluster generation, SSE: " + DistortionSum());
         }
 
         private void GenerateClustersWithK()
@@ -137,33 +133,12 @@ namespace CustomTFIDF
             {
                 _curIter++;
                 //TestOutPut();
-                Debug.WriteLine(_curIter + " iterations: ");
-                UpdateClusterDocuments(); // takes too long
+
+                UpdateClusterDocuments();
+
                 UpdateCentroidMeans();
             }
-            //TestOutPut();
-            Debug.WriteLine("Done");
-        }
-
-        private void TestOutPut()
-        {
-            Debug.WriteLine(_curIter + " iterations: ");
-
-            Debug.WriteLine("Clusters: ");
-            for (int c = 0; c < _clusters.Count; c++)
-            {
-                Debug.WriteLine("Cluster #" + c);
-                string s = "";
-                foreach (var documentIndex in _clusters[c].Documents)
-                {
-                    string sb;
-                    if (_indexToTitles.TryGetValue(documentIndex, out sb))
-                    {
-                        s += sb + ", ";
-                    }
-                }
-                Debug.WriteLine(s);
-            }
+            TestOutPut();
         }
 
         private void UpdateClusterDocuments()
@@ -175,17 +150,18 @@ namespace CustomTFIDF
             }
 
             // Assign each document to a cluster that is "closest" using cosine similarity -- bigger is closer!
-            for (int i = 0; i < _TFIDFVectors.Length; i++) // for each document vector
+            for (int i = 0; i < _TFIDFDicts.Length; i++) // for each document vector
             {
-                double[] currentDocVector = _TFIDFVectors[i];
+                Dictionary<int, double> currentDocDictionary = _TFIDFDicts[i];
+
                 int argmax = 0;
                 double max = 0; // from 0 ~ 1
-                
+
                 for (int j = 0; j < _clusters.Count; j++) // loop through clusters
                 {
-                    double[] currentClusterVector = _clusters[j].CentroidVector;
-                    double cosSim = CosineSimilarity(currentDocVector, currentClusterVector); // higher --> more similar
-
+                    Dictionary<int, double> currentClusterDictionary = _clusters[j].CentroidDictionary;
+                    double cosSim = CosineSimilarity(currentDocDictionary, currentClusterDictionary); 
+                    
                     if (cosSim > max) // current cluster is closer, update argmax and max
                     {
                         argmax = j;
@@ -197,56 +173,63 @@ namespace CustomTFIDF
                 _clusters[argmax].Documents.Add(i);
             }
         }
-        
+
         /// <summary>
         /// Updates the Centroid means, returns a boolean (true if at least one has changed)
         /// </summary>
         private void UpdateCentroidMeans()
         {
-            List<double[]> oldCentroidVectors = new List<double[]>();
-
+            // so that algorithm checks that centroid means have changed -- the condition for the algorithm to keep running
+            _hasChanged = false;
+            
             for (int i = 0; i < _clusters.Count; i++) // for each cluster
             {
-                // add to old
-                oldCentroidVectors.Add(_clusters[i].CentroidVector);
-                double[] updatedVector = new double[_clusters[i].CentroidVector.Length];
-
-                foreach (var documentIndex in _clusters[i].Documents) // for each document in cluster
+                Cluster currentCluster = _clusters[i];
+                Dictionary<int, double> updatedDictionary = new Dictionary<int, double>();
+                
+                // calculate the updated vector for the centroid (average)
+                foreach (var documentIndex in currentCluster.Documents)
                 {
-                    double[] documentVector = _TFIDFVectors[documentIndex];
-                    for (int j = 0; j < documentVector.Length; j++) // for each index in vector
+                    Dictionary<int, double> currentDocumentDictionary = _TFIDFDicts[documentIndex];
+
+                    foreach (var key in currentDocumentDictionary.Keys)
                     {
-                        updatedVector[j] += documentVector[j];
+                        if (updatedDictionary.ContainsKey(key))
+                        {
+                            updatedDictionary[key] = updatedDictionary[key] + currentDocumentDictionary[key];
+                        }
+                        else
+                        {
+                            updatedDictionary.Add(key, currentDocumentDictionary[key]);
+                        }
+                    }
+                }
+                
+                // Divide by how many documents were in the cluster to calculate average
+                List<int> keysList = new List<int>(updatedDictionary.Keys);
+                foreach (var key in keysList)
+                {
+                    updatedDictionary[key] = updatedDictionary[key] / currentCluster.Documents.Count;
+                }
+
+                // if centroid means have not changed yet, check if this one has changed
+                if (_hasChanged == false)
+                {
+                    if (!DictionaryUtils.DictionaryEqual(currentCluster.CentroidDictionary, updatedDictionary))
+                    {
+                        _hasChanged = true;
                     }
                 }
 
-                // Divide by how many documents were in the cluster to calculate average
-                for (int k = 0; k < updatedVector.Length; k++)
-                {
-                    updatedVector[k] = updatedVector[k] / _clusters[i].Documents.Count;
-                }
-
-                // update centroid's vector
-                _clusters[i].CentroidVector = updatedVector;
+                // actually update centroid for current cluster
+                currentCluster.CentroidDictionary = updatedDictionary;
             }
-
-            // Check that at least one has changed!
-            for (int l = 0; l < oldCentroidVectors.Count; l++)
-            {
-                // at least one has changed, return true
-                if (!oldCentroidVectors[l].SequenceEqual(_clusters[l].CentroidVector))
-                {
-                    _hasChanged = true;
-                    return;
-                }
-            }
-
-            // none have changed, return false -- stops algorithm
-            _hasChanged = false;
         }
-        
+
+        #region InitCentroids
         /// <summary>
         /// Choosing the first k centroids via the k-means++ algorithm: http://theory.stanford.edu/~sergei/papers/kMeansPP-soda.pdf
+        /// REEAAAALLLY SLOW, FIX!
         /// </summary>
         /// <returns></returns>
         private List<Cluster> InitCentroidsPlusPlus()
@@ -255,8 +238,8 @@ namespace CustomTFIDF
             _initClustersChosenSoFar = new List<Cluster>();
 
             // choose initial center c_1 uniformly at random from X (= set containing all document vectors, x_1, x_2, ..., x_n)
-            int randomInt = random.Next(_TFIDFVectors.Length);
-            Cluster c1 = new Cluster(_TFIDFVectors[randomInt]);
+            int randomInt = random.Next(_TFIDFDicts.Length);
+            Cluster c1 = new Cluster(_TFIDFDicts[randomInt]);
             _initClustersChosenSoFar.Add(c1);
 
             Debug.WriteLine("Adding initial clusters!");
@@ -268,20 +251,28 @@ namespace CustomTFIDF
                 _distanceSqToClosestCentroid = new double[_documents.Count];
 
                 // for each document, calculate the squared distance to the closest centroid (out of those initialized so far)
+                var watch = System.Diagnostics.Stopwatch.StartNew();
                 for (int i = 0; i < _documents.Count; i++)
                 {
-                    _distanceSqToClosestCentroid[i] = DistanceSqToClosestCentroid(_TFIDFVectors[i]);
+                    
+                    _distanceSqToClosestCentroid[i] = DistanceSqToClosestCentroid(_TFIDFDicts[i]);
+                    
                 }
+                watch.Stop();
+                Debug.WriteLine("Getting distance squareds: " + watch.ElapsedMilliseconds);
 
                 // choose next center, c_i, by selecting c_i = x' in X with custom probability function
+                var watch1 = System.Diagnostics.Stopwatch.StartNew();
                 int nextCenter = ReturnIntFromProbabilityFunction(_distanceSqToClosestCentroid);
-                _initClustersChosenSoFar.Add(new Cluster(_TFIDFVectors[nextCenter]));
+                watch1.Stop();
+                Debug.WriteLine("Probability: " + watch1.ElapsedMilliseconds);
+                _initClustersChosenSoFar.Add(new Cluster(_TFIDFDicts[nextCenter]));
                 Debug.WriteLine(nextCenter);
             }
-            
+
             return _initClustersChosenSoFar;
         }
-
+        
         /// <summary>
         /// 
         /// </summary>
@@ -302,7 +293,7 @@ namespace CustomTFIDF
             }
 
             test = test.Select(item => item / sum).ToArray();
-            
+
             double randomDouble = random.NextDouble();
 
             // now loop through the cdf array
@@ -323,36 +314,34 @@ namespace CustomTFIDF
         /// </summary>
         /// <param name="document"></param>
         /// <returns></returns>
-        private double DistanceSqToClosestCentroid(double[] tfidfVector)
+        private double DistanceSqToClosestCentroid(Dictionary<int, double> tfidfDictionary)
         {
             Cluster closestCluster = null;
             double minDist = Double.MaxValue;
-            
+
             foreach (var cluster in _initClustersChosenSoFar)
             {
-                // need to convert consine similarity into a distance measure, distance = abs(cosinesimilarity - 1)...mathematically sound??
-                //double distance = Math.Abs(CosineSimilarity(tfidfVector, cluster.CentroidVector) - 1);
+                double cosine = CosineSimilarity(tfidfDictionary, cluster.CentroidDictionary);
+                double checkCosine = cosine > 1 ? 1 : cosine;
 
-                // distance as theta
-                //Debug.WriteLine("cosine: " + CosineSimilarity(tfidfVector, cluster.CentroidVector));
-                double cosine = CosineSimilarity(tfidfVector, cluster.CentroidVector) > 1 ? 1 : CosineSimilarity(tfidfVector, cluster.CentroidVector);
-                
-                double distance = Math.Acos(cosine);
-                //Debug.WriteLine("distance: " + distance);
+                double distance = Math.Acos(checkCosine);
+
                 // update closestCluster if closer
                 if (distance < minDist)
                 {
                     minDist = distance;
                     closestCluster = cluster;
                 }
-            }  
+            }
 
             // Shouldn't be null!
             Debug.Assert(!closestCluster.Equals(null));
 
             return Math.Pow(minDist, 2);
         }
+        #endregion
 
+        #region Utils
         /// <summary>
         /// The sum of all distortion, where for each cluster the distortion is the sum of the distances from the documents in that cluster to its centroid
         /// </summary>
@@ -367,12 +356,10 @@ namespace CustomTFIDF
                 // local distortion for each cluster
                 foreach (var document in cluster.Documents)
                 {
-                    //double distance = Math.Abs(CosineSimilarity(_TFIDFVectors[document], cluster.CentroidVector) - 1);
-                    double distance = Math.Acos(CosineSimilarity(_TFIDFVectors[document], cluster.CentroidVector));
+                    double distance = Math.Acos(CosineSimilarity(_TFIDFDicts[document], cluster.CentroidDictionary));
                     distortionSum += distance;
                 }
             }
-            
             return distortionSum;
         }
 
@@ -382,29 +369,22 @@ namespace CustomTFIDF
         /// <param name="vec1"></param>
         /// <param name="vec2"></param>
         /// <returns></returns>
-        public static double CosineSimilarity(double[] vec1, double[] vec2)
+        public static double CosineSimilarity(Dictionary<int, double> d1, Dictionary<int, double> d2)
         {
-            double dotProduct = VectorUtil.dotProd(vec1, vec2);
-            return dotProduct;
-        }
-        
-        /// <summary>
-        /// Calculates the magnitude of a vector
-        /// </summary>
-        /// <param name="vec"></param>
-        /// <returns></returns>
-        private double VectorMagnitude(double[] vec)
-        {
-            double squareSum = 0.0;
+            double dotProduct = VectorUtil.dotProductDictionary(d1, d2);
 
-            foreach (var doub in vec)
+            // for error
+            if (dotProduct > 1)
             {
-                squareSum += Math.Pow(doub, 2);
+                dotProduct = 1;
             }
 
-            return Math.Sqrt(squareSum);
+            return dotProduct;
         }
 
+        #endregion
+
+        #region ChooseK
         /// <summary>
         /// Algorithm to choose optimal k for the dataset, http://www.ee.columbia.edu/~dpwe/papers/PhamDN05-kmeans.pdf
         /// </summary>
@@ -420,7 +400,8 @@ namespace CustomTFIDF
             else if (_k == 1)
             {
                 currentFK = 1.0;
-            } else 
+            }
+            else
             {
                 if (_previousSK == 0)
                 {
@@ -446,7 +427,8 @@ namespace CustomTFIDF
             if (_k < 2)
             {
                 _previousAK = -1.0;
-            } else if (_k == 2)
+            }
+            else if (_k == 2)
             {
                 _previousAK = 1 - ((double)3 / (4 * MegaDictionary.ReturnKeysList().Count)); // set current aK to previous
             }
@@ -457,6 +439,28 @@ namespace CustomTFIDF
 
             Debug.Assert(!_previousAK.Equals(-1.0));
             return _previousAK;
+        }
+        #endregion
+
+        private void TestOutPut()
+        {
+            Debug.WriteLine(_curIter + " iterations: ");
+
+            Debug.WriteLine("Clusters: ");
+            for (int c = 0; c < _clusters.Count; c++)
+            {
+                Debug.WriteLine("Cluster #" + c);
+                string s = "";
+                foreach (var documentIndex in _clusters[c].Documents)
+                {
+                    string sb;
+                    if (_indexToTitles.TryGetValue(documentIndex, out sb))
+                    {
+                        s += sb + ", ";
+                    }
+                }
+                Debug.WriteLine(s);
+            }
         }
     }
 }

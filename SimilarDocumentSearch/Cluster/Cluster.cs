@@ -4,12 +4,12 @@ namespace CustomTFIDF
 {
     public class Cluster
     {
-        public double[] CentroidVector { get; set; }
+        public Dictionary<int, double> CentroidDictionary { get; set; }
         public List<int> Documents { get; set; }
 
-        public Cluster(double[] centroid)
+        public Cluster(Dictionary<int, double> centroid)
         {
-            CentroidVector = centroid;
+            CentroidDictionary = centroid;
             Documents = new List<int>();
         }
     }
